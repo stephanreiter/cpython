@@ -135,8 +135,7 @@ across threads.
 
 Use PyThread_set_key_value(thekey, value) to associate void* value with
 thekey in the current thread.  Each thread has a distinct mapping of thekey
-to a void* value.  Caution:  if the current thread already has a mapping
-for thekey, value is ignored.
+to a void* value.
 
 Use PyThread_get_key_value(thekey) to retrieve the void* value associated
 with thekey in the current thread.  This returns NULL if no value is

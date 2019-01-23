@@ -43,8 +43,9 @@ static PyThread_type_lock head_mutex = NULL; /* Protects interp->tstate_head */
 #define HEAD_LOCK() PyThread_acquire_lock(head_mutex, WAIT_LOCK)
 #define HEAD_UNLOCK() PyThread_release_lock(head_mutex)
 
-/* The single PyInterpreterState used by this process'
-   GILState implementation
+/* The main PyInterpreterState of Python in this process.
+   It is used when a new OS thread, which has not had a PyThreadState
+   explicitly configured, calls PyGILState_Ensure.
 */
 static PyInterpreterState *autoInterpreterState = NULL;
 static int autoTLSkey = -1;
@@ -529,22 +530,31 @@ PyThreadState_Swap(PyThreadState *newts)
     PyThreadState *oldts = GET_TSTATE();
 
     SET_TSTATE(newts);
+
+#ifdef WITH_THREAD
+    /* This can be called from PyEval_RestoreThread(). Similar
+       to it, we need to ensure errno doesn't change.
+    */
+    int err = errno;
+
+#ifdef Py_DEBUG
     /* It should not be possible for more than one thread state
        to be used for a thread.  Check this the best we can in debug
        builds.
     */
-#if defined(Py_DEBUG) && defined(WITH_THREAD)
     if (newts) {
-        /* This can be called from PyEval_RestoreThread(). Similar
-           to it, we need to ensure errno doesn't change.
-        */
-        int err = errno;
         PyThreadState *check = PyGILState_GetThisThreadState();
         if (check && check->interp == newts->interp && check != newts)
             Py_FatalError("Invalid thread state for this thread");
-        errno = err;
     }
 #endif
+
+    if (newts && autoInterpreterState && PyThread_set_key_value(autoTLSkey, (void *)newts) < 0)
+        Py_FatalError("Couldn't update autoTLSkey mapping");
+
+    errno = err;
+#endif
+
     return oldts;
 }
 
@@ -780,10 +790,8 @@ _PyGILState_NoteThreadState(PyThreadState* tstate)
        The first thread state created for that given OS level thread will
        "win", which seems reasonable behaviour.
     */
-    if (PyThread_get_key_value(autoTLSkey) == NULL) {
-        if (PyThread_set_key_value(autoTLSkey, (void *)tstate) < 0)
-            Py_FatalError("Couldn't create autoTLSkey mapping");
-    }
+    if (PyThread_set_key_value(autoTLSkey, (void *)tstate) < 0)
+        Py_FatalError("Couldn't update autoTLSkey mapping");
 
     /* PyGILState_Release must not try to delete this thread state. */
     tstate->gilstate_counter = 1;
