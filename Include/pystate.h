@@ -254,6 +254,15 @@ PyAPI_FUNC(PyGILState_STATE) PyGILState_Ensure(void);
 */
 PyAPI_FUNC(void) PyGILState_Release(PyGILState_STATE);
 
+/* If a new thread calls PyGILState_Ensure(), it will invoke the callback
+   to determine the active interpreter, for which it will subsequently
+   create a thread-state and acquire the GIL.
+
+   The provided function must be thread-safe.
+*/
+typedef PyThreadState *(*ntis_callback)();
+PyAPI_FUNC(void) PyGILState_SetNewThreadInterpreterSelectionCallback(ntis_callback);
+
 /* Helper/diagnostic function - get the current thread state for
    this thread.  May return NULL if no GILState API has been used
    on the current thread.  Note that the main thread always has such a

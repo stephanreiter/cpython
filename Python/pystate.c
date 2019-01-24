@@ -49,6 +49,7 @@ static PyThread_type_lock head_mutex = NULL; /* Protects interp->tstate_head */
 */
 static PyInterpreterState *autoInterpreterState = NULL;
 static int autoTLSkey = -1;
+static _Py_atomic_address newThreadInterpreterSelectionCallback = {0};
 #else
 #define HEAD_INIT() /* Nothing */
 #define HEAD_LOCK() /* Nothing */
@@ -824,6 +825,12 @@ PyGILState_Check(void)
     return (tstate == PyGILState_GetThisThreadState());
 }
 
+void
+PyGILState_SetNewThreadInterpreterSelectionCallback(ntis_callback func)
+{
+    _Py_atomic_store_relaxed(&newThreadInterpreterSelectionCallback, (uintptr_t)(func));
+}
+
 PyGILState_STATE
 PyGILState_Ensure(void)
 {
@@ -843,7 +850,16 @@ PyGILState_Ensure(void)
         PyEval_InitThreads();
 
         /* Create a new thread state for this thread */
-        tcur = PyThreadState_New(autoInterpreterState);
+        PyInterpreterState *interp = autoInterpreterState;
+        ntis_callback func = (ntis_callback)_Py_atomic_load_relaxed(&newThreadInterpreterSelectionCallback);
+        if (func) {
+            PyThreadState *alternative = func();
+            if (alternative) {
+                interp = alternative->interp;
+            }
+        }
+
+        tcur = PyThreadState_New(interp);
         if (tcur == NULL)
             Py_FatalError("Couldn't create thread-state for new thread");
         /* This is our thread state!  We'll need to delete it in the
